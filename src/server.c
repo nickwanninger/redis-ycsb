@@ -8573,7 +8573,7 @@ int main(int argc, char **argv) {
         redisSetCpuAffinity(server.server_cpulist);
         setOOMScoreAdj(-1);
         int status = moduleRunYCSB(ycsb_workload);
-        zfree(ycsb_workload);
+        sdsfree(ycsb_workload);
         fflush(NULL);
         return status == C_OK ? 0 : 1;
     }
