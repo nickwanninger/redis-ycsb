@@ -7491,6 +7491,7 @@ void usage(void) {
     fprintf(stderr,"       ./redis-server -h or --help\n");
     fprintf(stderr,"       ./redis-server --test-memory <megabytes>\n");
     fprintf(stderr,"       ./redis-server --check-system\n");
+    fprintf(stderr,"       ./redis-server [config] --ycsb-run <workload> (run once and exit)\n");
     fprintf(stderr,"\n");
     fprintf(stderr,"Examples:\n");
     fprintf(stderr,"       ./redis-server (run the server with default conf)\n");
@@ -8247,6 +8248,7 @@ int main(int argc, char **argv) {
     struct timeval tv;
     int j;
     char config_from_stdin = 0;
+    char *ycsb_workload = NULL;
 
 #ifdef REDIS_TEST
     monotonicInit(NULL); /* Required for dict tests, that are relying on monotime during dict rehashing. */
@@ -8408,6 +8410,14 @@ int main(int argc, char **argv) {
              * string "port 6380\n" to be parsed after the actual config file
              * and stdin input are parsed (if they exist).
              * Only consider that if the last config has at least one argument. */
+            else if (handled_last_config_arg && !strcmp(argv[j], "--ycsb-run")) {
+                if (ycsb_workload || j + 1 >= argc || !strncmp(argv[j + 1], "--", 2)) {
+                    fprintf(stderr, "--ycsb-run requires one workload path and cannot repeat.\n");
+                    exit(1);
+                }
+                /* Resolve before the configuration can change the working directory. */
+                ycsb_workload = getAbsolutePath(argv[++j]);
+            }
             else if (handled_last_config_arg && argv[j][0] == '-' && argv[j][1] == '-') {
                 /* Option name */
                 if (sdslen(options)) options = sdscat(options,"\n");
@@ -8472,9 +8482,17 @@ int main(int argc, char **argv) {
             j++;
         }
 
+        if (ycsb_workload) {
+            /* Benchmark mode never writes data or forks into the background. */
+            options = sdscat(options, "\ndaemonize no\nsupervised no\nappendonly no\nsave \"\"\n");
+        }
         loadServerConfig(server.configfile, config_from_stdin, options);
         if (server.sentinel_mode) loadSentinelConfigFromQueue();
         sdsfree(options);
+    }
+    if (ycsb_workload && (server.sentinel_mode || server.cluster_enabled || server.masterhost)) {
+        fprintf(stderr, "--ycsb-run requires a standalone primary server.\n");
+        exit(1);
     }
     if (server.sentinel_mode) sentinelCheckConfigFile();
 
@@ -8544,11 +8562,21 @@ int main(int argc, char **argv) {
         moduleLoadFromQueue();
     }
     ACLLoadUsersAtStartup();
-    initListeners();
+    if (!ycsb_workload) initListeners();
     if (server.cluster_enabled) {
         clusterInitLast();
     }
     InitServerLast();
+
+    if (ycsb_workload) {
+        /* Run before loading data or entering the event loop. */
+        redisSetCpuAffinity(server.server_cpulist);
+        setOOMScoreAdj(-1);
+        int status = moduleRunYCSB(ycsb_workload);
+        zfree(ycsb_workload);
+        fflush(NULL);
+        return status == C_OK ? 0 : 1;
+    }
 
     if (!server.sentinel_mode) {
         /* Things not needed when running in Sentinel mode. */

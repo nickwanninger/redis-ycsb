@@ -3277,6 +3277,7 @@ int moduleOnLoad(int (*onload)(void *, void **, int), const char *path, void *ha
 int moduleLoad(const char *path, void **argv, int argc, int is_loadex);
 int moduleUnload(sds name, const char **errmsg, int forced_unload);
 void moduleLoadInternalModules(void);
+int moduleRunYCSB(const char *workload);
 void moduleLoadFromQueue(void);
 int moduleGetCommandKeysViaAPI(struct redisCommand *cmd, robj **argv, int argc, getKeysResult *result);
 int moduleGetCommandChannelsViaAPI(struct redisCommand *cmd, robj **argv, int argc, getKeysResult *result);

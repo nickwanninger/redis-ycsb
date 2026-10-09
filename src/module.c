@@ -13497,12 +13497,35 @@ void moduleRemoveCateogires(RedisModule *module) {
 }
 
 int VectorSets_OnLoad(RedisModuleCtx *ctx, RedisModuleString **argv, int argc);
-/* Load internal data types that bundled as modules */
+int YCSB_OnLoad(RedisModuleCtx *ctx, RedisModuleString **argv, int argc);
+/* Register built-in modules. */
 void moduleLoadInternalModules(void) {
 #ifdef INCLUDE_VEC_SETS
     int retval = moduleOnLoad((int (*)(void *, void **, int)) VectorSets_OnLoad, NULL, NULL, NULL, 0, 0);
     serverAssert(retval == C_OK);
 #endif
+    int ycsb_retval = moduleOnLoad((int (*)(void *, void **, int)) YCSB_OnLoad, NULL, NULL, NULL, 0, 0);
+    serverAssert(ycsb_retval == C_OK);
+}
+
+/* Execute the built-in workload command without a network connection. */
+int moduleRunYCSB(const char *workload) {
+    RedisModuleCtx ctx;
+    moduleCreateContext(&ctx, NULL, REDISMODULE_CTX_TEMP_CLIENT);
+    RedisModuleCallReply *reply = RM_Call(&ctx, "ycsb.run", "cE", workload);
+    int status = C_OK;
+    if (!reply) {
+        serverLog(LL_WARNING, "YCSB command failed: %s", strerror(errno));
+        status = C_ERR;
+    } else if (RM_CallReplyType(reply) == REDISMODULE_REPLY_ERROR) {
+        size_t len;
+        const char *error = RM_CallReplyStringPtr(reply, &len);
+        serverLog(LL_WARNING, "YCSB command failed: %.*s", (int)len, error);
+        status = C_ERR;
+    }
+    if (reply) RM_FreeCallReply(reply);
+    moduleFreeContext(&ctx);
+    return status;
 }
 
 /* Load all the modules in the server.loadmodule_queue list, which is

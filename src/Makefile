@@ -373,6 +373,10 @@ else
     endef
 endif
 
+# YCSB uses C++ but shares the Redis target and instrumentation flags.
+REDIS_YCSB_OBJ=ycsb.o ycsb_core_workload.o
+FINAL_CXXFLAGS=$(filter-out -std=% -Wstrict-prototypes,$(FINAL_CFLAGS)) -std=c++11 $(CXXFLAGS)
+REDIS_CXX=$(QUIET_CC)$(CXX) $(FINAL_CXXFLAGS)
 REDIS_CC=$(QUIET_CC)$(CC) $(FINAL_CFLAGS)
 REDIS_LD=$(QUIET_LINK)$(CC) $(FINAL_LDFLAGS)
 REDIS_INSTALL=$(QUIET_INSTALL)$(INSTALL)
@@ -441,6 +445,9 @@ persist-settings: distclean
 	echo LDFLAGS=$(LDFLAGS) >> .make-settings
 	echo REDIS_CFLAGS=$(REDIS_CFLAGS) >> .make-settings
 	echo REDIS_LDFLAGS=$(REDIS_LDFLAGS) >> .make-settings
+	echo CXX=$(CXX) >> .make-settings
+	echo CXXFLAGS=$(CXXFLAGS) >> .make-settings
+	echo PREV_FINAL_CXXFLAGS=$(FINAL_CXXFLAGS) >> .make-settings
 	echo PREV_FINAL_CFLAGS=$(FINAL_CFLAGS) >> .make-settings
 	echo PREV_FINAL_LDFLAGS=$(FINAL_LDFLAGS) >> .make-settings
 	-(cd ../deps && $(MAKE) $(DEPENDENCY_TARGETS) ENABLE_LTO="$(ENABLE_LTO)")
@@ -460,9 +467,13 @@ ifneq ($(strip $(PREV_FINAL_LDFLAGS)), $(strip $(FINAL_LDFLAGS)))
 .make-prerequisites: persist-settings
 endif
 
+ifneq ($(strip $(PREV_FINAL_CXXFLAGS)), $(strip $(FINAL_CXXFLAGS)))
+.make-prerequisites: persist-settings
+endif
+
 # redis-server
-$(REDIS_SERVER_NAME): $(REDIS_SERVER_OBJ) $(REDIS_VEC_SETS_OBJ)
-	$(REDIS_LD) -o $@ $^ ../deps/hiredis/libhiredis.a ../deps/lua/src/liblua.a ../deps/hdr_histogram/libhdrhistogram.a ../deps/fpconv/libfpconv.a ../deps/xxhash/libxxhash.a ../deps/tre/libtre.a $(FINAL_LIBS)
+$(REDIS_SERVER_NAME): $(REDIS_SERVER_OBJ) $(REDIS_VEC_SETS_OBJ) $(REDIS_YCSB_OBJ)
+	$(REDIS_LD) -o $@ $^ ../deps/hiredis/libhiredis.a ../deps/lua/src/liblua.a ../deps/hdr_histogram/libhdrhistogram.a ../deps/fpconv/libfpconv.a ../deps/xxhash/libxxhash.a ../deps/tre/libtre.a $(FINAL_LIBS) -lstdc++
 
 # redis-sentinel
 $(REDIS_SENTINEL_NAME): $(REDIS_SERVER_NAME)
@@ -488,7 +499,7 @@ $(REDIS_CLI_NAME): $(REDIS_CLI_OBJ)
 $(REDIS_BENCHMARK_NAME): $(REDIS_BENCHMARK_OBJ)
 	$(REDIS_LD) -o $@ $^ ../deps/hiredis/libhiredis.a ../deps/hdr_histogram/libhdrhistogram.a $(FINAL_LIBS) $(TLS_CLIENT_LIBS)
 
-DEP = $(REDIS_SERVER_OBJ:%.o=%.d) $(REDIS_VEC_SETS_OBJ:%.o=%.d) $(REDIS_CLI_OBJ:%.o=%.d) $(REDIS_BENCHMARK_OBJ:%.o=%.d)
+DEP = $(REDIS_YCSB_OBJ:%.o=%.d) $(REDIS_SERVER_OBJ:%.o=%.d) $(REDIS_VEC_SETS_OBJ:%.o=%.d) $(REDIS_CLI_OBJ:%.o=%.d) $(REDIS_BENCHMARK_OBJ:%.o=%.d)
 -include $(DEP)
 
 # Because the jemalloc.h header is generated as a part of the jemalloc build,
@@ -496,6 +507,12 @@ DEP = $(REDIS_SERVER_OBJ:%.o=%.d) $(REDIS_VEC_SETS_OBJ:%.o=%.d) $(REDIS_CLI_OBJ:
 # depending on a single artifact, build all dependencies first.
 %.o: %.c .make-prerequisites
 	$(REDIS_CC) -MMD -o $@ -c $<
+
+ycsb.o: ../ycsb/ycsb.cpp .make-prerequisites
+	$(REDIS_CXX) -MMD -o $@ -c $<
+
+ycsb_core_workload.o: ../ycsb/core/core_workload.cc .make-prerequisites
+	$(REDIS_CXX) -MMD -o $@ -c $<
 
 # The following files are checked in and don't normally need to be rebuilt. They
 # are built only if python is available and their prereqs are modified.

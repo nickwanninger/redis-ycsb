@@ -1,3 +1,84 @@
+# Redis fork with built-in YCSB
+
+This fork adds a generated YCSB workload runner to Redis for benchmarking and Yukon evaluation. YCSB is linked into `redis-server`; no plugin file or `--loadmodule` option is required. The adapter uses the Redis module API internally and stores records as Redis hashes.
+
+The workload runs inside the server without a network client. Results measure in-process command execution, not network throughput or concurrent clients. Use this fork for benchmark experiments, not as a production server.
+
+## Build this fork
+
+Install a C compiler, a C++ compiler with C++11 support, GNU Make, and Python 3. From the repository root:
+
+```sh
+make -C src -j"$(nproc)" redis-server redis-cli
+```
+
+To compare libc with the Yukon preload libraries, select libc when building:
+
+```sh
+make -C src -j"$(nproc)" MALLOC=libc redis-server redis-cli
+```
+
+For performance comparisons, use the same compiler, allocator, and optimization flags in each run. Set `OPTIMIZATION=-O3` explicitly if needed. See the upstream build instructions below for other platforms and dependencies.
+
+## Evaluate YCSB workloads
+
+Run one workload and exit:
+
+```sh
+src/redis-server redis.conf --ycsb-run ycsb/workloads/workloada.spec
+```
+
+`--ycsb-run` starts with an empty database, loads records, runs the workload, and exits. It skips network listeners and disk loading, and disables persistence, supervision, and daemon mode. Cluster, replica, and Sentinel configurations are not supported. Other configuration settings, such as memory limits and CPU affinity, still apply. Exit status is `0` on success and `1` on a command error.
+
+Supported workloads are A (read/update), B (mostly reads), C (reads), D (read/insert), and F (read/modify/write). Workload E requires scans and is not supported. Edit `recordcount`, `operationcount`, and the operation proportions in a workload file to control the run. Record count must be at least 2; operation count must be non-negative.
+
+To run all supported workloads separately:
+
+```sh
+mkdir -p results
+for workload in a b c d f; do
+  src/redis-server redis.conf --ycsb-run "ycsb/workloads/workload${workload}.spec" \
+    > "results/workload${workload}.out" || break
+done
+```
+
+The server prints `YUKON_YCSB_*` metrics, including load duration, workload duration, workload cycles, operation counts, and throughput. Throughput is workload operations per second. `perf stat` measures the full process, including startup and record loading:
+
+```sh
+perf stat -ddd -- src/redis-server redis.conf \
+  --ycsb-run ycsb/workloads/workloada.spec
+```
+
+`test.sh` runs a baseline and two Yukon variants, and writes output to `results/`:
+
+```sh
+bash test.sh ycsb/workloads/workloada.spec
+```
+
+This script requires Linux `perf`, permission to collect performance counters, and `libyukon_stub_nohandle.so` and `libyukon_stub_handle.so` in the repository root. Its `libc` label assumes a `MALLOC=libc` build. Without an argument, it uses the larger root `workloada.spec`.
+
+You can also run YCSB on an existing server:
+
+```sh
+src/redis-server redis.conf
+# In another terminal:
+src/redis-cli ycsb.run ycsb/workloads/workloada.spec
+```
+
+This command blocks normal command processing and can replace keys in the selected database. Use a dedicated benchmark server.
+
+Run the YCSB tests with Tcl installed:
+
+```sh
+./runtest --single unit/ycsb
+```
+
+See [ycsb/README.md](ycsb/README.md) for cross-compilation and further details.
+
+---
+
+# Upstream Redis documentation
+
 [![codecov](https://codecov.io/github/redis/redis/graph/badge.svg?token=6bVHb5fRuz)](https://codecov.io/github/redis/redis)
 
 This document serves as both a quick start guide to Redis and a detailed resource for building it from source.
